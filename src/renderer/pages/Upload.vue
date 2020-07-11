@@ -20,12 +20,12 @@
             <input type="file" id="file-uploader" @change="onChange" multiple>
           </div>
         </div>
-        <el-progress 
-          :percentage="progress" 
-          :show-text="false" 
+        <el-progress
+          :percentage="progress"
+          :show-text="false"
           class="upload-progress"
           :class="{ 'show': showProgress }"
-          :status="showError ? 'exception' : 'text'" 
+          :status="showError ? 'exception' : undefined"
         ></el-progress>
         <div class="paste-style">
           <div class="el-col-16">
@@ -48,30 +48,43 @@
             <div class="paste-style__text">
               快捷上传
             </div>
-            <el-button type="primary" round size="mini" @click="uploadClipboardFiles" class="paste-upload">剪贴板图片上传</el-button>
+            <el-button type="primary" round size="mini" @click="uploadClipboardFiles" class="quick-upload" style="width: 50%">剪贴板图片</el-button>
+            <el-button type="primary" round size="mini" @click="uploadURLFiles" class="quick-upload" style="width: 46%; margin-left: 6px">URL</el-button>
           </div>
         </div>
       </el-col>
     </el-row>
   </div>
 </template>
-<script>
-export default {
-  name: 'upload',
-  data () {
-    return {
-      dragover: false,
-      progress: 0,
-      showProgress: false,
-      showError: false,
-      pasteStyle: '',
-      picBed: [],
-      picBedName: '',
-      menu: null
-    }
-  },
+<script lang="ts">
+import { Component, Vue, Watch } from 'vue-property-decorator'
+import {
+  ipcRenderer,
+  IpcRendererEvent,
+  remote
+} from 'electron'
+import {
+  SHOW_INPUT_BOX,
+  SHOW_INPUT_BOX_RESPONSE
+} from '~/universal/events/constants'
+import {
+  isUrl
+} from '~/universal/utils/common'
+const { Menu } = remote
+@Component({
+  name: 'upload'
+})
+export default class extends Vue {
+  dragover = false
+  progress = 0
+  showProgress = false
+  showError = false
+  pasteStyle = ''
+  picBed: IPicBedType[] = []
+  picBedName = ''
+  menu: Electron.Menu | null= null
   mounted () {
-    this.$electron.ipcRenderer.on('uploadProgress', (event, progress) => {
+    ipcRenderer.on('uploadProgress', (event: IpcRendererEvent, progress: number) => {
       if (progress !== -1) {
         this.showProgress = true
         this.progress = progress
@@ -82,94 +95,141 @@ export default {
     })
     this.getPasteStyle()
     this.getDefaultPicBed()
-    this.$electron.ipcRenderer.on('syncPicBed', () => {
+    ipcRenderer.on('syncPicBed', () => {
       this.getDefaultPicBed()
     })
-    this.$electron.ipcRenderer.send('getPicBeds')
-    this.$electron.ipcRenderer.on('getPicBeds', this.getPicBeds)
-  },
-  watch: {
-    progress (val) {
-      if (val === 100) {
-        setTimeout(() => {
-          this.showProgress = false
-          this.showError = false
-        }, 1000)
-        setTimeout(() => {
-          this.progress = 0
-        }, 1200)
-      }
+    ipcRenderer.send('getPicBeds')
+    ipcRenderer.on('getPicBeds', this.getPicBeds)
+    this.$bus.$on(SHOW_INPUT_BOX_RESPONSE, this.handleInputBoxValue)
+  }
+  @Watch('progress')
+  onProgressChange (val: number) {
+    if (val === 100) {
+      setTimeout(() => {
+        this.showProgress = false
+        this.showError = false
+      }, 1000)
+      setTimeout(() => {
+        this.progress = 0
+      }, 1200)
     }
-  },
+  }
   beforeDestroy () {
-    this.$electron.ipcRenderer.removeAllListeners('uploadProgress')
-    this.$electron.ipcRenderer.removeAllListeners('syncPicBed')
-    this.$electron.ipcRenderer.removeListener('getPicBeds', this.getPicBeds)
-  },
-  methods: {
-    onDrop (e) {
-      this.dragover = false
-      this.ipcSendFiles(e.dataTransfer.files)
-    },
-    openUplodWindow () {
-      document.getElementById('file-uploader').click()
-    },
-    onChange (e) {
-      this.ipcSendFiles(e.target.files)
-      document.getElementById('file-uploader').value = ''
-    },
-    ipcSendFiles (files) {
-      let sendFiles = []
-      Array.from(files).forEach((item, index) => {
-        let obj = {
-          name: item.name,
-          path: item.path
-        }
-        sendFiles.push(obj)
-      })
-      this.$electron.ipcRenderer.send('uploadChoosedFiles', sendFiles)
-    },
-    getPasteStyle () {
-      this.pasteStyle = this.$db.read().get('settings.pasteStyle').value() || 'markdown'
-    },
-    handlePasteStyleChange (val) {
-      this.$db.read().set('settings.pasteStyle', val)
-        .write()
-    },
-    uploadClipboardFiles () {
-      this.$electron.ipcRenderer.send('uploadClipboardFilesFromUploadPage')
-    },
-    getDefaultPicBed () {
-      const current = this.$db.read().get('picBed.current').value()
-      this.picBed.forEach(item => {
-        if (item.type === current) {
-          this.picBedName = item.name
-        }
-      })
-    },
-    getPicBeds (event, picBeds) {
-      this.picBed = picBeds
-      this.getDefaultPicBed()
-    },
-    handleChangePicBed () {
-      this.buildMenu()
-      this.menu.popup(this.$electron.remote.getCurrentWindow())
-    },
-    buildMenu () {
-      const _this = this
-      const submenu = this.picBed.map(item => {
-        return {
-          label: item.name,
-          type: 'radio',
-          checked: this.$db.read().get('picBed.current').value() === item.type,
-          click () {
-            _this.$db.read().set('picBed.current', item.type).write()
-            _this.$electron.ipcRenderer.send('syncPicBed')
-          }
-        }
-      })
-      this.menu = this.$electron.remote.Menu.buildFromTemplate(submenu)
+    this.$bus.$off(SHOW_INPUT_BOX_RESPONSE)
+    ipcRenderer.removeAllListeners('uploadProgress')
+    ipcRenderer.removeAllListeners('syncPicBed')
+    ipcRenderer.removeListener('getPicBeds', this.getPicBeds)
+  }
+  onDrop (e: DragEvent) {
+    this.dragover = false
+    const items = e.dataTransfer!.items
+    if (items.length === 2 && items[0].type === 'text/uri-list') {
+      this.handleURLDrag(items, e.dataTransfer!)
+    } else if (items[0].type === 'text/plain') {
+      const str = e.dataTransfer!.getData(items[0].type)
+      if (isUrl(str)) {
+        ipcRenderer.send('uploadChoosedFiles', [{ path: str }])
+      } else {
+        this.$message.error('请拖入合法的图片文件或者图片URL地址')
+      }
+    } else {
+      this.ipcSendFiles(e.dataTransfer!.files)
     }
+  }
+  handleURLDrag (items: DataTransferItemList, dataTransfer: DataTransfer) {
+    // text/html
+    // Use this data to get a more precise URL
+    const urlString = dataTransfer.getData(items[1].type)
+    const urlMatch = urlString.match(/<img.*src="(.*?)"/)
+    if (urlMatch) {
+      ipcRenderer.send('uploadChoosedFiles', [
+        {
+          path: urlMatch[1]
+        }
+      ])
+    } else {
+      this.$message.error('请拖入合法的图片文件或者图片URL地址')
+    }
+  }
+  openUplodWindow () {
+    document.getElementById('file-uploader')!.click()
+  }
+  onChange (e: any) {
+    this.ipcSendFiles(e.target.files);
+    (document.getElementById('file-uploader') as HTMLInputElement).value = ''
+  }
+  ipcSendFiles (files: FileList) {
+    let sendFiles: IFileWithPath[] = []
+    Array.from(files).forEach((item, index) => {
+      let obj = {
+        name: item.name,
+        path: item.path
+      }
+      sendFiles.push(obj)
+    })
+    ipcRenderer.send('uploadChoosedFiles', sendFiles)
+  }
+  getPasteStyle () {
+    this.pasteStyle = this.$db.get('settings.pasteStyle') || 'markdown'
+  }
+  handlePasteStyleChange (val: string) {
+    this.$db.set('settings.pasteStyle', val)
+  }
+  uploadClipboardFiles () {
+    ipcRenderer.send('uploadClipboardFilesFromUploadPage')
+  }
+  async uploadURLFiles () {
+    const str = await navigator.clipboard.readText()
+    this.$bus.$emit(SHOW_INPUT_BOX, {
+      value: isUrl(str) ? str : '',
+      title: '请输入URL',
+      placeholder: 'http://或者https://开头'
+    })
+  }
+  handleInputBoxValue (val: string) {
+    if (val === '') return false
+    if (isUrl(val)) {
+      ipcRenderer.send('uploadChoosedFiles', [{
+        path: val
+      }])
+    } else {
+      this.$message.error('请输入合法的URL')
+    }
+  }
+  getDefaultPicBed () {
+    const current: string = this.$db.get('picBed.current')
+    this.picBed.forEach(item => {
+      if (item.type === current) {
+        this.picBedName = item.name
+      }
+    })
+  }
+  getPicBeds (event: Event, picBeds: IPicBedType[]) {
+    this.picBed = picBeds
+    this.getDefaultPicBed()
+  }
+  handleChangePicBed () {
+    this.buildMenu()
+    // this.menu.popup(remote.getCurrentWindow())
+    this.menu!.popup()
+  }
+  buildMenu () {
+    const _this = this
+    const submenu = this.picBed.filter(item => item.visible).map(item => {
+      return {
+        label: item.name,
+        type: 'radio',
+        checked: this.$db.get('picBed.current') === item.type,
+        click () {
+          _this.letPicGoSaveData({
+            'picBed.current': item.type
+          })
+          ipcRenderer.send('syncPicBed')
+        }
+      }
+    })
+    // @ts-ignore
+    this.menu = Menu.buildFromTemplate(submenu)
   }
 }
 </script>
@@ -234,6 +294,6 @@ export default {
     .el-radio-button__inner
       border-left none
       border-radius 0 14px 14px 0
-  .paste-upload
-    width 100%
+  .el-icon-caret-bottom
+    cursor pointer
 </style>

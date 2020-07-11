@@ -21,13 +21,15 @@ export default {
     }
   },
   created () {
-    if (this.type === this.$db.get('picBed.current').value()) {
+    if (this.type === this.$db.get('picBed.current')) {
       this.value = true
     }
   },
   methods: {
     choosePicBed (val) {
-      this.$db.set('picBed.current', this.type)
+      this.letPicGoSaveData({
+        'picBed.current': this.type
+      })
       this.$emit('update:choosed', this.type)
     }
   }

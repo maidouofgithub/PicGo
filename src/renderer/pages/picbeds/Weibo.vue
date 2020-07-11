@@ -3,9 +3,9 @@
     <el-row :gutter="16">
       <el-col :span="16" :offset="4">
         <div class="view-title">
-          微博图床设置
+          微博图床设置[已停止支持]
         </div>
-        <el-form 
+        <el-form
           ref="weiboForm"
           label-position="right"
           label-width="120px"
@@ -78,7 +78,7 @@ export default {
     }
   },
   created () {
-    const config = this.$db.read().get('picBed.weibo').value()
+    const config = this.$db.get('picBed.weibo')
     if (config) {
       this.form.username = config.username
       this.form.password = config.password
@@ -91,13 +91,15 @@ export default {
     confirm (formName) {
       this.$refs[formName].validate((valid) => {
         if (valid) {
-          this.$db.read().set('picBed.weibo', {
-            username: this.form.username,
-            password: this.form.password,
-            quality: this.quality,
-            cookie: this.form.cookie,
-            chooseCookie: this.chooseCookie
-          }).write()
+          this.letPicGoSaveData({
+            'picBed.weibo': {
+              username: this.form.username,
+              password: this.form.password,
+              quality: this.quality,
+              cookie: this.form.cookie,
+              chooseCookie: this.chooseCookie
+            }
+          })
           const successNotification = new window.Notification('设置结果', {
             body: '设置成功'
           })
@@ -123,7 +125,7 @@ export default {
   left 60%
 #weibo-view
   .el-form
-    label  
+    label
       line-height 22px
       padding-bottom 0
       color #eee

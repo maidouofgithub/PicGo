@@ -5,7 +5,7 @@
         <div class="view-title">
           GitHub设置
         </div>
-        <el-form 
+        <el-form
           ref="github"
           label-position="right"
           label-width="120px"
@@ -33,7 +33,7 @@
             :rules="{
               required: true, message: 'Token不能为空', trigger: 'blur'
             }">
-            <el-input v-model="form.token" @keyup.native.enter="confirm" placeholder="token"></el-input>
+            <el-input v-model="form.token" @keyup.native.enter="confirm" placeholder="token" type="password"></el-input>
           </el-form-item>
           <el-form-item
             label="指定存储路径"
@@ -56,53 +56,51 @@
     </el-row>
   </div>
 </template>
-<script>
+<script lang="ts">
+import { Component, Vue } from 'vue-property-decorator'
 import mixin from '@/utils/ConfirmButtonMixin'
-export default {
+@Component({
   name: 'github',
-  mixins: [mixin],
-  data () {
-    return {
-      form: {
-        repo: '',
-        token: '',
-        path: '',
-        customUrl: '',
-        branch: ''
-      }
-    }
-  },
+  mixins: [mixin]
+})
+export default class extends Vue {
+  form: IGitHubConfig = {
+    repo: '',
+    token: '',
+    path: '',
+    customUrl: '',
+    branch: ''
+  }
   created () {
-    const config = this.$db.get('picBed.github').value()
+    const config = this.$db.get('picBed.github') as IGitHubConfig
     if (config) {
-      for (let i in config) {
-        this.form[i] = config[i]
-      }
+      this.form = Object.assign({}, config)
     }
-  },
-  methods: {
-    confirm () {
-      this.$refs.github.validate((valid) => {
-        if (valid) {
-          this.$db.set('picBed.github', this.form).write()
-          const successNotification = new window.Notification('设置结果', {
-            body: '设置成功'
-          })
-          successNotification.onclick = () => {
-            return true
-          }
-        } else {
-          return false
+  }
+  confirm () {
+    // @ts-ignore
+    this.$refs.github.validate((valid) => {
+      if (valid) {
+        this.letPicGoSaveData({
+          'picBed.github': this.form
+        })
+        const successNotification = new Notification('设置结果', {
+          body: '设置成功'
+        })
+        successNotification.onclick = () => {
+          return true
         }
-      })
-    }
+      } else {
+        return false
+      }
+    })
   }
 }
 </script>
 <style lang='stylus'>
 #github-view
   .el-form
-    label  
+    label
       line-height 22px
       padding-bottom 0
       color #eee
@@ -111,7 +109,7 @@ export default {
   .el-radio-group
     width 100%
     label
-      width 25%  
+      width 25%
     .el-radio-button__inner
       width 100%
   .el-radio-button:first-child

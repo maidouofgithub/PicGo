@@ -5,7 +5,7 @@
         <div class="view-title">
           七牛图床设置
         </div>
-        <el-form 
+        <el-form
           ref="qiniu"
           label-position="right"
           label-width="120px"
@@ -45,13 +45,10 @@
           </el-form-item>
           <el-form-item
             label="确认存储区域"
-            >
-            <el-radio-group v-model="form.area" size="mini">
-              <el-radio-button label="z0">华东</el-radio-button>
-              <el-radio-button label="z1">华北</el-radio-button>
-              <el-radio-button label="z2">华南</el-radio-button>
-              <el-radio-button label="na0">北美</el-radio-button>
-            </el-radio-group>
+            :rules="{
+              required: true, message: '区域代码不能为空', trigger: 'blur'
+            }">
+            <el-input v-model="form.area" placeholder="例如z0"></el-input>
           </el-form-item>
           <el-form-item
             label="设定网址后缀"
@@ -74,55 +71,53 @@
     </el-row>
   </div>
 </template>
-<script>
+<script lang="ts">
+import { Component, Vue } from 'vue-property-decorator'
 import mixin from '@/utils/ConfirmButtonMixin'
-export default {
-  mixins: [mixin],
+@Component({
   name: 'qiniu',
-  data () {
-    return {
-      form: {
-        accessKey: '',
-        secretKey: '',
-        bucket: '',
-        url: '',
-        area: 'z0',
-        options: '',
-        path: ''
-      }
-    }
-  },
+  mixins: [mixin]
+})
+export default class extends Vue {
+  form: IQiniuConfig = {
+    accessKey: '',
+    secretKey: '',
+    bucket: '',
+    url: '',
+    area: '',
+    options: '',
+    path: ''
+  }
   created () {
-    const config = this.$db.get('picBed.qiniu').value()
+    const config = this.$db.get('picBed.qiniu') as IQiniuConfig
     if (config) {
-      for (let i in config) {
-        this.form[i] = config[i]
-      }
+      this.form = Object.assign({}, config)
     }
-  },
-  methods: {
-    confirm () {
-      this.$refs.qiniu.validate((valid) => {
-        if (valid) {
-          this.$db.set('picBed.qiniu', this.form).write()
-          const successNotification = new window.Notification('设置结果', {
-            body: '设置成功'
-          })
-          successNotification.onclick = () => {
-            return true
-          }
-        } else {
-          return false
+  }
+  confirm () {
+    // @ts-ignore
+    this.$refs.qiniu.validate((valid) => {
+      if (valid) {
+        this.letPicGoSaveData({
+          'picBed.qiniu': this.form
+        })
+        const successNotification = new Notification('设置结果', {
+          body: '设置成功'
+        })
+        successNotification.onclick = () => {
+          return true
         }
-      })
-    }
+      } else {
+        return false
+      }
+    })
   }
 }
 </script>
 <style lang='stylus'>
 #qiniu-view
   .el-form
-    label  
+    label
       line-height 22px
       padding-bottom 0
       color #eee
@@ -133,7 +128,7 @@ export default {
   .el-radio-group
     width 100%
     label
-      width 25%  
+      width 25%
     .el-radio-button__inner
       width 100%
   .el-radio-button:first-child

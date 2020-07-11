@@ -5,7 +5,7 @@
         <div class="view-title">
           Imgur图床设置
         </div>
-        <el-form 
+        <el-form
           ref="imgur"
           label-position="right"
           label-width="120px"
@@ -36,50 +36,48 @@
     </el-row>
   </div>
 </template>
-<script>
+<script lang="ts">
+import { Component, Vue } from 'vue-property-decorator'
 import mixin from '@/utils/ConfirmButtonMixin'
-export default {
+@Component({
   name: 'imgur',
-  mixins: [mixin],
-  data () {
-    return {
-      form: {
-        clientId: '',
-        proxy: ''
-      }
-    }
-  },
+  mixins: [mixin]
+})
+export default class extends Vue {
+  form: IImgurConfig = {
+    clientId: '',
+    proxy: ''
+  }
   created () {
-    const config = this.$db.get('picBed.imgur').value()
+    const config = this.$db.get('picBed.imgur') as IImgurConfig
     if (config) {
-      for (let i in config) {
-        this.form[i] = config[i]
-      }
+      this.form = Object.assign({}, config)
     }
-  },
-  methods: {
-    confirm () {
-      this.$refs.imgur.validate((valid) => {
-        if (valid) {
-          this.$db.set('picBed.imgur', this.form).write()
-          const successNotification = new window.Notification('设置结果', {
-            body: '设置成功'
-          })
-          successNotification.onclick = () => {
-            return true
-          }
-        } else {
-          return false
+  }
+  confirm () {
+    // @ts-ignore
+    this.$refs.imgur.validate((valid) => {
+      if (valid) {
+        this.letPicGoSaveData({
+          'picBed.imgur': this.form
+        })
+        const successNotification = new Notification('设置结果', {
+          body: '设置成功'
+        })
+        successNotification.onclick = () => {
+          return true
         }
-      })
-    }
+      } else {
+        return false
+      }
+    })
   }
 }
 </script>
 <style lang='stylus'>
 #imgur-view
   .el-form
-    label  
+    label
       line-height 22px
       padding-bottom 0
       color #eee
@@ -90,7 +88,7 @@ export default {
   .el-radio-group
     width 100%
     label
-      width 25%  
+      width 25%
     .el-radio-button__inner
       width 100%
   .el-radio-button:first-child

@@ -5,7 +5,7 @@
         <div class="view-title">
           阿里云OSS设置
         </div>
-        <el-form 
+        <el-form
           ref="aliyun"
           label-position="right"
           label-width="120px"
@@ -49,6 +49,11 @@
             <el-input v-model="form.path" @keyup.native.enter="confirm" placeholder="例如img/"></el-input>
           </el-form-item>
           <el-form-item
+            label="设定网址后缀"
+            >
+            <el-input v-model="form.options" @keyup.native.enter="confirm" placeholder="例如?x-oss-process=xxx"></el-input>
+          </el-form-item>
+          <el-form-item
             label="设定自定义域名"
             >
             <el-input v-model="form.customUrl" @keyup.native.enter="confirm" placeholder="例如https://xxxx.com"></el-input>
@@ -64,54 +69,53 @@
     </el-row>
   </div>
 </template>
-<script>
+<script lang="ts">
+import { Component, Vue } from 'vue-property-decorator'
 import mixin from '@/utils/ConfirmButtonMixin'
-export default {
-  mixins: [mixin],
+@Component({
   name: 'aliyun',
-  data () {
-    return {
-      form: {
-        accessKeyId: '',
-        accessKeySecret: '',
-        bucket: '',
-        area: '',
-        path: '',
-        customUrl: ''
-      }
-    }
-  },
+  mixins: [mixin]
+})
+export default class extends Vue {
+  form: IAliYunConfig = {
+    accessKeyId: '',
+    accessKeySecret: '',
+    bucket: '',
+    area: '',
+    path: '',
+    customUrl: '',
+    options: ''
+  }
   created () {
-    const config = this.$db.get('picBed.aliyun').value()
+    const config = this.$db.get('picBed.aliyun') as IAliYunConfig
     if (config) {
-      for (let i in config) {
-        this.form[i] = config[i]
-      }
+      this.form = Object.assign({}, config)
     }
-  },
-  methods: {
-    confirm () {
-      this.$refs.aliyun.validate((valid) => {
-        if (valid) {
-          this.$db.set('picBed.aliyun', this.form).write()
-          const successNotification = new window.Notification('设置结果', {
-            body: '设置成功'
-          })
-          successNotification.onclick = () => {
-            return true
-          }
-        } else {
-          return false
+  }
+  confirm () {
+    // @ts-ignore
+    this.$refs.aliyun.validate((valid) => {
+      if (valid) {
+        this.letPicGoSaveData({
+          'picBed.aliyun': this.form
+        })
+        const successNotification = new window.Notification('设置结果', {
+          body: '设置成功'
+        })
+        successNotification.onclick = () => {
+          return true
         }
-      })
-    }
+      } else {
+        return false
+      }
+    })
   }
 }
 </script>
 <style lang='stylus'>
 #aliyun-view
   .el-form
-    label  
+    label
       line-height 22px
       padding-bottom 0
       color #eee
@@ -122,7 +126,7 @@ export default {
   .el-radio-group
     width 100%
     label
-      width 25%  
+      width 25%
     .el-radio-button__inner
       width 100%
   .el-radio-button:first-child

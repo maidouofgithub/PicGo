@@ -9,7 +9,7 @@
     >
       <el-form-item
         v-for="(item, index) in configList"
-        :label="item.name"
+        :label="item.alias || item.name"
         :required="item.required"
         :prop="item.name"
         :key="item.name + index"
@@ -26,7 +26,7 @@
           :placeholder="item.message || item.name"
         >
           <el-option
-            v-for="(choice, idx) in item.choices"
+            v-for="choice in item.choices"
             :label="choice.name || choice.value || choice"
             :key="choice.name || choice.value || choice"
             :value="choice.value || choice"
@@ -40,7 +40,7 @@
           collapse-tags
         >
           <el-option
-            v-for="(choice, idx) in item.choices"
+            v-for="choice in item.choices"
             :label="choice.name || choice.value || choice"
             :key="choice.value || choice"
             :value="choice.value || choice"
@@ -58,67 +58,62 @@
     </el-form>
   </div>
 </template>
-<script>
+<script lang="ts">
+import {
+  Component,
+  Vue,
+  Prop,
+  Watch
+} from 'vue-property-decorator'
 import { cloneDeep, union } from 'lodash'
-export default {
-  name: 'config-form',
-  props: {
-    config: Array,
-    type: String,
-    id: {
-      type: String,
-      default: ''
-    }
-  },
-  data () {
-    return {
-      configList: [],
-      ruleForm: {}
-    }
-  },
-  created () {
-  },
-  watch: {
-    config: {
-      deep: true,
-      handler (val) {
-        this.ruleForm = Object.assign({}, {})
-        const config = this.$db.read().get(`picBed.${this.id}`).value()
-        if (val.length > 0) {
-          this.configList = cloneDeep(val).map(item => {
-            let defaultValue = item.default !== undefined
-              ? item.default : item.type === 'checkbox'
-                ? [] : null
-            if (item.type === 'checkbox') {
-              const defaults = item.choices.filter(i => {
-                return i.checked
-              }).map(i => i.value)
-              defaultValue = union(defaultValue, defaults)
-            }
-            if (config && config[item.name] !== undefined) {
-              defaultValue = config[item.name]
-            }
-            this.$set(this.ruleForm, item.name, defaultValue)
-            return item
-          })
+
+@Component({
+  name: 'config-form'
+})
+export default class extends Vue {
+  @Prop() private config!: any[]
+  @Prop() readonly type!: string
+  @Prop() readonly id!: string
+  configList = []
+  ruleForm = {}
+  @Watch('config', {
+    deep: true,
+    immediate: true
+  })
+  handleConfigChange (val: any) {
+    this.ruleForm = Object.assign({}, {})
+    const config = this.$db.get(`picBed.${this.id}`)
+    if (val.length > 0) {
+      this.configList = cloneDeep(val).map((item: any) => {
+        let defaultValue = item.default !== undefined
+          ? item.default : item.type === 'checkbox'
+            ? [] : null
+        if (item.type === 'checkbox') {
+          const defaults = item.choices.filter((i: any) => {
+            return i.checked
+          }).map((i: any) => i.value)
+          defaultValue = union(defaultValue, defaults)
         }
-      },
-      immediate: true
-    }
-  },
-  methods: {
-    async validate () {
-      return new Promise((resolve, reject) => {
-        this.$refs.form.validate(valid => {
-          if (valid) {
-            resolve(this.ruleForm)
-          } else {
-            resolve(false)
-            return false
-          }
-        })
+        if (config && config[item.name] !== undefined) {
+          defaultValue = config[item.name]
+        }
+        this.$set(this.ruleForm, item.name, defaultValue)
+        return item
       })
     }
+  }
+  async validate () {
+    return new Promise((resolve, reject) => {
+      // @ts-ignore
+      this.$refs.form.validate((valid: boolean) => {
+        if (valid) {
+          resolve(this.ruleForm)
+        } else {
+          resolve(false)
+          return false
+        }
+      })
+    })
   }
 }
 </script>

@@ -48,14 +48,19 @@
                 <i slot="suffix" class="el-input__icon el-icon-close" v-if="searchText" @click="cleanSearch" style="cursor: pointer"></i>
               </el-input>
             </el-col>
-            <el-col :span="6">
+            <el-col :span="4">
               <div class="item-base copy round" :class="{ active: isMultiple(choosedList)}" @click="multiCopy">
-                <i class="el-icon-document"></i> 批量复制
+                复制
               </div>
             </el-col>
-            <el-col :span="6">
+            <el-col :span="4">
               <div class="item-base delete round" :class="{ active: isMultiple(choosedList)}" @click="multiRemove">
-                <i class="el-icon-delete"></i> 批量删除
+                删除
+              </div>
+            </el-col>
+            <el-col :span="4">
+              <div class="item-base all-pick round" :class="{ active: filterList.length > 0}" @click="toggleSelectAll">
+                {{ isAllSelected ? '取消' : '全选' }}
               </div>
             </el-col>
           </el-row>
@@ -72,18 +77,18 @@
             :options="options"
           ></gallerys>
           <el-col :span="6" v-for="(item, index) in images" :key="item.id" class="gallery-list__img">
-            <div 
+            <div
               class="gallery-list__item"
-              v-lazy:background-image="item.imgUrl"
               @click="zoomImage(index)"
             >
+              <img v-lazy="item.imgUrl" class="gallery-list__item-img">
             </div>
             <div class="gallery-list__tool-panel">
               <i class="el-icon-document" @click="copy(item)"></i>
               <i class="el-icon-edit-outline" @click="openDialog(item)"></i>
               <i class="el-icon-delete" @click="remove(item.id)"></i>
-              <el-checkbox v-model="choosedList[item.id]" class="pull-right" @change=" handleBarActive = true"></el-checkbox>
-            </div> 
+              <el-checkbox v-model="choosedList[item.id]" class="pull-right" @change="(val) => handleChooseImage(val, index)"></el-checkbox>
+            </div>
           </el-col>
         </el-row>
       </el-col>
@@ -102,260 +107,316 @@
     </el-dialog>
   </div>
 </template>
-<script>
+<script lang="ts">
+// @ts-ignore
 import gallerys from 'vue-gallery'
-import pasteStyle from '~/main/utils/pasteTemplate'
-export default {
+import pasteStyle from '#/utils/pasteTemplate'
+import { Component, Vue, Watch } from 'vue-property-decorator'
+import {
+  ipcRenderer,
+  clipboard,
+  IpcRendererEvent
+} from 'electron'
+@Component({
   name: 'gallery',
   components: {
     gallerys
-  },
-  data () {
-    return {
-      images: [],
-      idx: null,
-      options: {
-        titleProperty: 'fileName',
-        urlProperty: 'imgUrl',
-        closeOnSlideClick: true
-      },
-      dialogVisible: false,
-      imgInfo: {
-        id: null,
-        imgUrl: ''
-      },
-      choosedList: {},
-      choosedPicBed: [],
-      searchText: '',
-      handleBarActive: false,
-      pasteStyle: '',
-      pasteStyleMap: {
-        Markdown: 'markdown',
-        HTML: 'HTML',
-        URL: 'URL',
-        UBB: 'UBB',
-        Custom: 'Custom'
-      },
-      picBed: []
+  }
+})
+export default class extends Vue {
+  images: ImgInfo[] = []
+  idx: null | number = null
+  options = {
+    titleProperty: 'fileName',
+    urlProperty: 'imgUrl',
+    closeOnSlideClick: true
+  }
+  dialogVisible = false
+  imgInfo = {
+    id: '',
+    imgUrl: ''
+  }
+  choosedList: IObjT<boolean> = {}
+  choosedPicBed: string[] = []
+  lastChoosed: number = -1
+  isShiftKeyPress: boolean = false
+  searchText = ''
+  handleBarActive = false
+  pasteStyle = ''
+  pasteStyleMap = {
+    Markdown: 'markdown',
+    HTML: 'HTML',
+    URL: 'URL',
+    UBB: 'UBB',
+    Custom: 'Custom'
+  }
+  picBed: IPicBedType[] = []
+  @Watch('$route')
+  handleRouteUpdate (to: any, from: any) {
+    if (from.name === 'gallery') {
+      this.clearChoosedList()
     }
-  },
-  beforeRouteEnter (to, from, next) {
-    next(vm => {
-      vm.getGallery()
-      vm.getPasteStyle()
-      vm.getPicBeds()
-    })
-  },
+  }
   created () {
-    this.$electron.ipcRenderer.on('updateGallery', (event) => {
+    ipcRenderer.on('updateGallery', (event: IpcRendererEvent) => {
       this.$nextTick(() => {
         this.filterList = this.getGallery()
       })
     })
-    this.$electron.ipcRenderer.send('getPicBeds')
-    this.$electron.ipcRenderer.on('getPicBeds', this.getPicBeds)
-  },
-  computed: {
-    filterList: {
-      get () {
-        return this.getGallery()
-      },
-      set (val) {
-        return this.val
+    ipcRenderer.send('getPicBeds')
+    ipcRenderer.on('getPicBeds', this.getPicBeds)
+  }
+  mounted () {
+    document.addEventListener('keydown', this.handleDetectShiftKey)
+    document.addEventListener('keyup', this.handleDetectShiftKey)
+  }
+  handleDetectShiftKey (event: KeyboardEvent) {
+    if (event.keyCode === 16) {
+      this.isShiftKeyPress = !this.isShiftKeyPress
+    }
+  }
+  get filterList () {
+    return this.getGallery()
+  }
+  set filterList (val) {
+    this.images = val
+  }
+  get isAllSelected () {
+    const values = Object.values(this.choosedList)
+    if (values.length === 0) {
+      return false
+    } else {
+      return this.filterList.every(item => {
+        return this.choosedList[item.id!]
+      })
+    }
+  }
+  getPicBeds (event: IpcRendererEvent, picBeds: IPicBedType[]) {
+    this.picBed = picBeds
+  }
+  getGallery () {
+    if (this.choosedPicBed.length > 0) {
+      let arr: ImgInfo[] = []
+      this.choosedPicBed.forEach(item => {
+        let obj: IObj = {
+          type: item
+        }
+        if (this.searchText) {
+          obj.fileName = this.searchText
+        }
+        // @ts-ignore
+        arr = arr.concat(this.$db.read().get('uploaded').filter(obj => {
+          return obj.fileName.indexOf(this.searchText) !== -1 && obj.type === item
+        }).reverse().value())
+      })
+      this.images = arr
+    } else {
+      if (this.searchText) {
+        let data = this.$db.read().get('uploaded')
+        // @ts-ignore
+          .filter(item => {
+            return item.fileName.indexOf(this.searchText) !== -1
+          }).reverse().value()
+        this.images = data
+      } else {
+        // @ts-ignore
+        this.images = this.$db.read().get('uploaded').slice().reverse().value()
       }
     }
-  },
-  methods: {
-    getPicBeds (event, picBeds) {
-      this.picBed = picBeds
-    },
-    getGallery () {
-      if (this.choosedPicBed.length > 0) {
-        let arr = []
-        this.choosedPicBed.forEach(item => {
-          let obj = {
-            type: item
-          }
-          if (this.searchText) {
-            obj.fileName = this.searchText
-          }
-          arr = arr.concat(this.$db.read().get('uploaded').filter(obj => {
-            return obj.fileName.indexOf(this.searchText) !== -1 && obj.type === item
-          }).reverse().value())
-        })
-        this.images = arr
-      } else {
-        if (this.searchText) {
-          let data = this.$db.read().get('uploaded')
-            .filter(item => {
-              return item.fileName.indexOf(this.searchText) !== -1
-            }).reverse().value()
-          this.images = data
-        } else {
-          this.images = this.$db.read().get('uploaded').slice().reverse().value()
+    return this.images
+  }
+  @Watch('filterList')
+  handleFilterListChange () {
+    this.clearChoosedList()
+  }
+  handleChooseImage (val: boolean, index: number) {
+    if (val === true) {
+      this.handleBarActive = true
+      if (this.lastChoosed !== -1 && this.isShiftKeyPress) {
+        let min = Math.min(this.lastChoosed, index)
+        let max = Math.max(this.lastChoosed, index)
+        for (let i = min + 1; i < max; i++) {
+          const id = this.filterList[i].id!
+          this.$set(this.choosedList, id, true)
         }
       }
-      return this.images
-    },
-    zoomImage (index) {
-      this.idx = index
-      this.changeZIndexForGallery(true)
-    },
-    changeZIndexForGallery (isOpen) {
-      if (isOpen) {
-        document.querySelector('.main-content.el-row').style.zIndex = 101
-      } else {
-        document.querySelector('.main-content.el-row').style.zIndex = 10
-      }
-    },
-    handleClose () {
-      this.idx = null
-      this.changeZIndexForGallery(false)
-    },
-    copy (item) {
-      const url = item.url || item.imgUrl
-      const style = this.$db.read().get('settings.pasteStyle').value() || 'markdown'
-      const copyLink = pasteStyle(style, url)
+      this.lastChoosed = index
+    }
+  }
+  clearChoosedList () {
+    this.isShiftKeyPress = false
+    Object.keys(this.choosedList).forEach(key => {
+      this.choosedList[key] = false
+    })
+    this.lastChoosed = -1
+  }
+  zoomImage (index: number) {
+    this.idx = index
+    this.changeZIndexForGallery(true)
+  }
+  changeZIndexForGallery (isOpen: boolean) {
+    if (isOpen) {
+      // @ts-ignore
+      document.querySelector('.main-content.el-row').style.zIndex = 101
+    } else {
+      // @ts-ignore
+      document.querySelector('.main-content.el-row').style.zIndex = 10
+    }
+  }
+  handleClose () {
+    this.idx = null
+    this.changeZIndexForGallery(false)
+  }
+  copy (item: ImgInfo) {
+    const style = this.$db.get('settings.pasteStyle') || 'markdown'
+    const copyLink = pasteStyle(style, item)
+    const obj = {
+      title: '复制链接成功',
+      body: copyLink,
+      icon: item.url || item.imgUrl
+    }
+    const myNotification = new Notification(obj.title, obj)
+    clipboard.writeText(copyLink)
+    myNotification.onclick = () => {
+      return true
+    }
+  }
+  remove (id: string) {
+    this.$confirm('此操作将把该图片移出相册, 是否继续?', '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    }).then(() => {
+      const file = this.$db.getById('uploaded', id)
+      this.$db.removeById('uploaded', id)
+      ipcRenderer.send('removeFiles', [file])
       const obj = {
-        title: '复制链接成功',
-        body: copyLink,
-        icon: url
+        title: '操作结果',
+        body: '删除成功'
       }
-      const myNotification = new window.Notification(obj.title, obj)
-      this.$electron.clipboard.writeText(copyLink)
+      const myNotification = new Notification(obj.title, obj)
       myNotification.onclick = () => {
         return true
       }
-    },
-    remove (id) {
-      this.$confirm('此操作将把该图片移出相册, 是否继续?', '提示', {
+      this.getGallery()
+    }).catch((e) => {
+      console.log(e)
+      return true
+    })
+  }
+  openDialog (item: ImgInfo) {
+    this.imgInfo.id = item.id!
+    this.imgInfo.imgUrl = item.imgUrl as string
+    this.dialogVisible = true
+  }
+  confirmModify () {
+    this.$db.read().get('uploaded')
+      // @ts-ignore
+      .getById(this.imgInfo.id)
+      .assign({ imgUrl: this.imgInfo.imgUrl })
+      .write()
+    const obj = {
+      title: '修改图片URL成功',
+      body: this.imgInfo.imgUrl,
+      icon: this.imgInfo.imgUrl
+    }
+    const myNotification = new Notification(obj.title, obj)
+    myNotification.onclick = () => {
+      return true
+    }
+    this.dialogVisible = false
+    this.getGallery()
+  }
+  choosePicBed (type: string) {
+    let idx = this.choosedPicBed.indexOf(type)
+    if (idx !== -1) {
+      this.choosedPicBed.splice(idx, 1)
+    } else {
+      this.choosedPicBed.push(type)
+    }
+  }
+  cleanSearch () {
+    this.searchText = ''
+  }
+  isMultiple (obj: IObj) {
+    return Object.values(obj).some(item => item)
+  }
+  toggleSelectAll () {
+    const result = !this.isAllSelected
+    this.filterList.forEach(item => {
+      this.$set(this.choosedList, item.id!, result)
+    })
+  }
+  multiRemove () {
+    // choosedList -> { [id]: true or false }; true means choosed. false means not choosed.
+    const multiRemoveNumber = Object.values(this.choosedList).filter(item => item).length
+    if (multiRemoveNumber) {
+      this.$confirm(`将在相册中移除刚才选中的 ${multiRemoveNumber} 张图片，是否继续？`, '提示', {
         confirmButtonText: '确定',
         cancelButtonText: '取消',
         type: 'warning'
       }).then(() => {
-        const file = this.$db.read().get('uploaded').getById(id).value()
-        this.$db.read().get('uploaded').removeById(id).write()
-        this.$electron.ipcRenderer.send('removeFiles', [file])
+        let files: ImgInfo[] = []
+        Object.keys(this.choosedList).forEach(key => {
+          if (this.choosedList[key]) {
+            const file = this.$db.getById('uploaded', key)
+            files.push(file)
+            this.$db.removeById('uploaded', key)
+          }
+        })
+        this.clearChoosedList()
+        this.choosedList = {} // 只有删除才能将这个置空
+        this.getGallery()
         const obj = {
           title: '操作结果',
           body: '删除成功'
         }
-        const myNotification = new window.Notification(obj.title, obj)
+        ipcRenderer.send('removeFiles', files)
+        const myNotification = new Notification(obj.title, obj)
         myNotification.onclick = () => {
           return true
         }
-        this.getGallery()
       }).catch(() => {
         return true
       })
-    },
-    openDialog (item) {
-      this.imgInfo.id = item.id
-      this.imgInfo.imgUrl = item.imgUrl
-      this.dialogVisible = true
-    },
-    confirmModify () {
-      this.$db.read().get('uploaded')
-        .getById(this.imgInfo.id)
-        .assign({imgUrl: this.imgInfo.imgUrl})
-        .write()
+    }
+  }
+  multiCopy () {
+    if (Object.values(this.choosedList).some(item => item)) {
+      const copyString: string[] = []
+      const style = this.$db.get('settings.pasteStyle') || 'markdown'
+      // choosedList -> { [id]: true or false }; true means choosed. false means not choosed.
+      Object.keys(this.choosedList).forEach(key => {
+        if (this.choosedList[key]) {
+          const item = this.$db.getById('uploaded', key)
+          copyString.push(pasteStyle(style, item))
+          this.choosedList[key] = false
+        }
+      })
       const obj = {
-        title: '修改图片URL成功',
-        body: this.imgInfo.imgUrl,
-        icon: this.imgInfo.imgUrl
+        title: '批量复制链接成功',
+        body: copyString.join('\n')
       }
-      const myNotification = new window.Notification(obj.title, obj)
+      const myNotification = new Notification(obj.title, obj)
+      clipboard.writeText(copyString.join('\n'))
       myNotification.onclick = () => {
         return true
       }
-      this.dialogVisible = false
-      this.getGallery()
-    },
-    choosePicBed (type) {
-      let idx = this.choosedPicBed.indexOf(type)
-      if (idx !== -1) {
-        this.choosedPicBed.splice(idx, 1)
-      } else {
-        this.choosedPicBed.push(type)
-      }
-    },
-    cleanSearch () {
-      this.searchText = ''
-    },
-    isMultiple (obj) {
-      return Object.values(obj).some(item => item)
-    },
-    multiRemove () {
-      // choosedList -> { [id]: true or false }; true means choosed. false means not choosed.
-      if (Object.values(this.choosedList).some(item => item)) {
-        this.$confirm('将删除刚才选中的图片，是否继续？', '提示', {
-          confirmButtonText: '确定',
-          cancelButtonText: '取消',
-          type: 'warning'
-        }).then(() => {
-          let files = []
-          Object.keys(this.choosedList).forEach(key => {
-            if (this.choosedList[key]) {
-              const file = this.$db.read().get('uploaded').getById(key).value()
-              files.push(file)
-              this.$db.read().get('uploaded').removeById(key).write()
-            }
-          })
-          this.choosedList = {}
-          this.getGallery()
-          const obj = {
-            title: '操作结果',
-            body: '删除成功'
-          }
-          this.$electron.ipcRenderer.send('removeFiles', files)
-          const myNotification = new window.Notification(obj.title, obj)
-          myNotification.onclick = () => {
-            return true
-          }
-        }).catch(() => {
-          return true
-        })
-      }
-    },
-    multiCopy () {
-      if (Object.values(this.choosedList).some(item => item)) {
-        let copyString = ''
-        const style = this.$db.read().get('settings.pasteStyle').value() || 'markdown'
-        // choosedList -> { [id]: true or false }; true means choosed. false means not choosed.
-        Object.keys(this.choosedList).forEach(key => {
-          if (this.choosedList[key]) {
-            const item = this.$db.read().get('uploaded').getById(key).value()
-            const url = item.url || item.imgUrl
-            copyString += pasteStyle(style, url) + '\n'
-            this.choosedList[key] = false
-          }
-        })
-        const obj = {
-          title: '批量复制链接成功',
-          body: copyString
-        }
-        const myNotification = new window.Notification(obj.title, obj)
-        this.$electron.clipboard.writeText(copyString)
-        myNotification.onclick = () => {
-          return true
-        }
-      }
-    },
-    toggleHandleBar () {
-      this.handleBarActive = !this.handleBarActive
-    },
-    getPasteStyle () {
-      this.pasteStyle = this.$db.read().get('settings.pasteStyle').value() || 'markdown'
-    },
-    handlePasteStyleChange (val) {
-      this.$db.read().set('settings.pasteStyle', val)
-        .write()
-      this.pasteStyle = val
     }
-  },
+  }
+  toggleHandleBar () {
+    this.handleBarActive = !this.handleBarActive
+  }
+  getPasteStyle () {
+    this.pasteStyle = this.$db.get('settings.pasteStyle') || 'markdown'
+  }
+  handlePasteStyleChange (val: string) {
+    this.$db.set('settings.pasteStyle', val)
+    this.pasteStyle = val
+  }
   beforeDestroy () {
-    this.$electron.ipcRenderer.removeAllListeners('updateGallery')
-    this.$electron.ipcRenderer.removeListener('getPicBeds', this.getPicBeds)
+    ipcRenderer.removeAllListeners('updateGallery')
+    ipcRenderer.removeListener('getPicBeds', this.getPicBeds)
   }
 }
 </script>
@@ -397,6 +458,13 @@ export default {
       cursor pointer
       background #F15140
       color #fff
+  &.all-pick
+    cursor not-allowed
+    background #69C282
+    &.active
+      cursor pointer
+      background #44B363
+      color #fff
 #gallery-view
   position relative
   .round
@@ -423,22 +491,23 @@ export default {
     &__item
       width 100%
       height 120px
-      background-size cover
-      background-position 50% 50%
-      background-repeat no-repeat
       transition all .2s ease-in-out
       cursor pointer
       margin-bottom 8px
+      overflow hidden
+      display flex
       &-fake
         position absolute
         top 0
-        left 0 
+        left 0
         opacity 0
         width 100%
         z-index -1
       &:hover
-        background-color #49B1F5
         transform scale(1.1)
+      &-img
+        width 100%
+        object-fit fill
     &__tool-panel
       color #ddd
       i

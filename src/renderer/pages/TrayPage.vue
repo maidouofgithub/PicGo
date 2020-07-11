@@ -4,7 +4,7 @@
     <div class="content">
       <div class="wait-upload-img" v-if="clipboardFiles.length > 0">
         <div class="list-title">等待上传</div>
-        <div v-for="(item, index) in clipboardFiles" :key="index" class="img-list" :style="{height: calcHeight(item.width, item.height) + 'px'}">
+        <div v-for="(item, index) in clipboardFiles" :key="index" class="img-list">
           <div
             class="upload-img__container"
             :class="{ upload: uploadFlag }"
@@ -15,7 +15,7 @@
       </div>
       <div class="uploaded-img">
         <div class="list-title">已上传</div>
-        <div v-for="item in files" :key="item.imgUrl" class="img-list" :style="{height: calcHeight(item.width, item.height) + 'px'}">
+        <div v-for="item in files" :key="item.imgUrl" class="img-list">
           <div class="upload-img__container" @click="copyTheLink(item)">
             <img :src="item.imgUrl" class="upload-img">
           </div>
@@ -25,91 +25,91 @@
   </div>
 </template>
 
-<script>
-  import mixin from '@/utils/mixin'
-  import pasteTemplate from '~/main/utils/pasteTemplate'
-  export default {
-    name: 'tray-page',
-    mixins: [mixin],
-    data () {
-      return {
-        files: [],
-        notification: {
-          title: '复制链接成功',
-          body: '',
-          icon: ''
-        },
-        clipboardFiles: [],
-        uploadFlag: false
-      }
-    },
-    computed: {
-      reverseList () {
-        return this.files.slice().reverse()
-      }
-    },
-    mounted () {
-      this.disableDragFile()
-      this.getData()
-      this.$electron.ipcRenderer.on('dragFiles', (event, files) => {
-        files.forEach(item => {
-          this.$db.read().get('uploaded').insert(item).write()
-        })
-        this.files = this.$db.read().get('uploaded').slice().reverse().slice(0, 5).value()
-      })
-      this.$electron.ipcRenderer.on('clipboardFiles', (event, files) => {
-        this.clipboardFiles = files
-      })
-      this.$electron.ipcRenderer.on('uploadFiles', (event) => {
-        this.files = this.$db.read().get('uploaded').slice().reverse().slice(0, 5).value()
-        this.uploadFlag = false
-      })
-      this.$electron.ipcRenderer.on('updateFiles', (event) => {
-        this.getData()
-      })
-    },
-    beforeDestroy () {
-      this.$electron.ipcRenderer.removeAllListeners('dragFiles')
-      this.$electron.ipcRenderer.removeAllListeners('clipboardFiles')
-      this.$electron.ipcRenderer.removeAllListeners('uploadClipboardFiles')
-      this.$electron.ipcRenderer.removeAllListeners('updateFiles')
-    },
-    methods: {
-      getData () {
-        this.files = this.$db.read().get('uploaded').slice().reverse().slice(0, 5).value()
-      },
-      copyTheLink (item) {
-        this.notification.body = item.imgUrl
-        this.notification.icon = item.imgUrl
-        const myNotification = new window.Notification(this.notification.title, this.notification)
-        const pasteStyle = this.$db.read().get('settings.pasteStyle').value() || 'markdown'
-        this.$electron.clipboard.writeText(pasteTemplate(pasteStyle, item.imgUrl))
-        myNotification.onclick = () => {
-          return true
-        }
-      },
-      calcHeight (width, height) {
-        return height * 160 / width
-      },
-      disableDragFile () {
-        window.addEventListener('dragover', (e) => {
-          e = e || event
-          e.preventDefault()
-        }, false)
-        window.addEventListener('drop', (e) => {
-          e = e || event
-          e.preventDefault()
-        }, false)
-      },
-      uploadClipboardFiles () {
-        if (this.uploadFlag) {
-          return
-        }
-        this.uploadFlag = true
-        this.$electron.ipcRenderer.send('uploadClipboardFiles')
-      }
+<script lang="ts">
+import { Component, Vue } from 'vue-property-decorator'
+import mixin from '@/utils/mixin'
+import pasteTemplate from '#/utils/pasteTemplate'
+import { ipcRenderer, clipboard } from 'electron'
+@Component({
+  name: 'tray-page',
+  mixins: [mixin]
+})
+export default class extends Vue {
+  files = []
+  notification = {
+    title: '复制链接成功',
+    body: '',
+    icon: ''
+  }
+  clipboardFiles: ImgInfo[] = []
+  uploadFlag = false
+  get reverseList () {
+    return this.files.slice().reverse()
+  }
+  getData () {
+    // @ts-ignore
+    this.files = this.$db.read().get('uploaded').slice().reverse().slice(0, 5).value()
+  }
+  copyTheLink (item: ImgInfo) {
+    this.notification.body = item.imgUrl!
+    this.notification.icon = item.imgUrl!
+    const myNotification = new Notification(this.notification.title, this.notification)
+    const pasteStyle = this.$db.get('settings.pasteStyle') || 'markdown'
+    clipboard.writeText(pasteTemplate(pasteStyle, item))
+    myNotification.onclick = () => {
+      return true
     }
   }
+  calcHeight (width: number, height: number): number {
+    return height * 160 / width
+  }
+  disableDragFile () {
+    window.addEventListener('dragover', (e) => {
+      e = e || event
+      e.preventDefault()
+    }, false)
+    window.addEventListener('drop', (e) => {
+      e = e || event
+      e.preventDefault()
+    }, false)
+  }
+  uploadClipboardFiles () {
+    if (this.uploadFlag) {
+      return
+    }
+    this.uploadFlag = true
+    ipcRenderer.send('uploadClipboardFiles')
+  }
+  mounted () {
+    this.disableDragFile()
+    this.getData()
+    ipcRenderer.on('dragFiles', (event: Event, files: string[]) => {
+      files.forEach(item => {
+        this.$db.insert('uploaded', item)
+      })
+      // @ts-ignore
+      this.files = this.$db.read().get('uploaded').slice().reverse().slice(0, 5).value()
+    })
+    ipcRenderer.on('clipboardFiles', (event: Event, files: ImgInfo[]) => {
+      this.clipboardFiles = files
+    })
+    ipcRenderer.on('uploadFiles', (event: Event) => {
+      // @ts-ignore
+      this.files = this.$db.read().get('uploaded').slice().reverse().slice(0, 5).value()
+      console.log(this.files)
+      this.uploadFlag = false
+    })
+    ipcRenderer.on('updateFiles', (event: Event) => {
+      this.getData()
+    })
+  }
+  beforeDestroy () {
+    ipcRenderer.removeAllListeners('dragFiles')
+    ipcRenderer.removeAllListeners('clipboardFiles')
+    ipcRenderer.removeAllListeners('uploadClipboardFiles')
+    ipcRenderer.removeAllListeners('updateFiles')
+  }
+}
 </script>
 
 <style lang="stylus">
@@ -146,11 +146,11 @@ body::-webkit-scrollbar
     top 0px
     width 100%
   .img-list
-    padding 16px 8px
+    padding 8px 8px
     display flex
     justify-content space-between
     align-items center
-    height 45px
+    // height 45px
     cursor pointer
     transition all .2s ease-in-out
     &:hover
@@ -158,8 +158,8 @@ body::-webkit-scrollbar
       .upload-img__index
         color #fff
   .upload-img
-    height 100%
     width 100%
+    object-fit scale-down
     margin 0 auto
     &__container
       width 100%

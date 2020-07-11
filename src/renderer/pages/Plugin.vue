@@ -17,7 +17,7 @@
         <div class="plugin-item" :class="{ 'darwin': os === 'darwin' }">
           <div class="cli-only-badge" v-if="!item.gui" title="CLI only">CLI</div>
           <img class="plugin-item__logo" :src="item.logo"
-          onerror="this.src='static/roundLogo.png'"
+            :onerror="defaultLogo"
           >
           <div
             class="plugin-item__content"
@@ -91,81 +91,78 @@
         <el-button type="primary" @click="handleConfirmConfig" round>确定</el-button>
       </span>
     </el-dialog>
-    <el-dialog
-      :title="inputBoxOptions.title || '输入框'"
-      :visible.sync="showInputBoxVisible"
-      :modal-append-to-body="false"
-      @close="handleInputBoxClose"
-    >
-      <el-input
-        v-model="inputBoxValue"
-        :placeholder="inputBoxOptions.placeholder"></el-input>
-      <span slot="footer">
-        <el-button @click="showInputBoxVisible = false" round>取消</el-button>
-        <el-button type="primary" @click="showInputBoxVisible = false" round>确定</el-button>
-      </span>
-    </el-dialog>
   </div>
 </template>
-<script>
-import ConfigForm from '@/components/ConfigForm'
+<script lang="ts">
+import {
+  Component,
+  Vue,
+  Watch
+} from 'vue-property-decorator'
+import ConfigForm from '@/components/ConfigForm.vue'
 import { debounce } from 'lodash'
-export default {
+import {
+  ipcRenderer,
+  remote,
+  IpcRendererEvent
+} from 'electron'
+const { Menu } = remote
+
+@Component({
   name: 'plugin',
   components: {
     ConfigForm
-  },
-  data () {
-    return {
-      searchText: '',
-      pluginList: [],
-      menu: null,
-      config: [],
-      currentType: '',
-      configName: '',
-      dialogVisible: false,
-      pluginNameList: [],
-      loading: true,
-      needReload: false,
-      id: '',
-      os: '',
-      // for showInputBox
-      showInputBoxVisible: false,
-      inputBoxValue: '',
-      inputBoxOptions: {
-        title: '',
-        placeholder: ''
-      }
+  }
+})
+export default class extends Vue {
+  searchText = ''
+  pluginList: IPicGoPlugin[] = []
+  menu: Electron.Menu | null = null
+  config: any[] = []
+  currentType = ''
+  configName = ''
+  dialogVisible = false
+  pluginNameList: string[] = []
+  loading = true
+  needReload = false
+  id = ''
+  os = ''
+  defaultLogo: string = 'this.src="https://cdn.jsdelivr.net/gh/Molunerfinn/PicGo@dev/public/roundLogo.png"'
+  get npmSearchText () {
+    return this.searchText.match('picgo-plugin-')
+      ? this.searchText
+      : this.searchText !== ''
+        ? `picgo-plugin-${this.searchText}`
+        : this.searchText
+  }
+  @Watch('npmSearchText')
+  onNpmSearchTextChange (val: string) {
+    if (val) {
+      this.loading = true
+      this.pluginList = []
+      this.getSearchResult(val)
+    } else {
+      this.getPluginList()
     }
-  },
-  computed: {
-    npmSearchText () {
-      return this.searchText.match('picgo-plugin-')
-        ? this.searchText
-        : this.searchText !== ''
-          ? `picgo-plugin-${this.searchText}`
-          : this.searchText
+  }
+  @Watch('dialogVisible')
+  onDialogVisible (val: boolean) {
+    if (val) {
+      // @ts-ignore
+      document.querySelector('.main-content.el-row').style.zIndex = 101
+    } else {
+      // @ts-ignore
+      document.querySelector('.main-content.el-row').style.zIndex = 10
     }
-  },
-  watch: {
-    npmSearchText (val) {
-      if (val) {
-        this.loading = true
-        this.pluginList = []
-        this.getSearchResult(val)
-      } else {
-        this.getPluginList()
-      }
-    }
-  },
+  }
   created () {
     this.os = process.platform
-    this.$electron.ipcRenderer.on('pluginList', (evt, list) => {
+    ipcRenderer.on('pluginList', (evt: IpcRendererEvent, list: IPicGoPlugin[]) => {
       this.pluginList = list
       this.pluginNameList = list.map(item => item.name)
       this.loading = false
     })
-    this.$electron.ipcRenderer.on('installSuccess', (evt, plugin) => {
+    ipcRenderer.on('installSuccess', (evt: IpcRendererEvent, plugin: string) => {
       this.loading = false
       this.pluginList.forEach(item => {
         if (item.name === plugin) {
@@ -174,7 +171,7 @@ export default {
         }
       })
     })
-    this.$electron.ipcRenderer.on('updateSuccess', (evt, plugin) => {
+    ipcRenderer.on('updateSuccess', (evt: IpcRendererEvent, plugin: string) => {
       this.loading = false
       this.pluginList.forEach(item => {
         if (item.name === plugin) {
@@ -186,7 +183,7 @@ export default {
       this.handleReload()
       this.getPluginList()
     })
-    this.$electron.ipcRenderer.on('uninstallSuccess', (evt, plugin) => {
+    ipcRenderer.on('uninstallSuccess', (evt: IpcRendererEvent, plugin: string) => {
       this.loading = false
       this.pluginList = this.pluginList.filter(item => {
         if (item.name === plugin) { // restore Uploader & Transformer after uninstalling
@@ -204,252 +201,267 @@ export default {
     })
     this.getPluginList()
     this.getSearchResult = debounce(this.getSearchResult, 50)
-    this.needReload = this.$db.read().get('needReload').value()
-    this.$electron.ipcRenderer.on('showInputBox', (evt, options) => {
-      this.inputBoxValue = ''
-      this.inputBoxOptions.title = options.title || ''
-      this.inputBoxOptions.placeholder = options.placeholder || ''
-      this.showInputBoxVisible = true
-    })
-  },
-  methods: {
-    buildContextMenu (plugin) {
-      const _this = this
-      let menu = [{
-        label: '启用插件',
-        enabled: !plugin.enabled,
-        click () {
-          _this.$db.read().set(`picgoPlugins.picgo-plugin-${plugin.name}`, true).write()
-          plugin.enabled = true
-          _this.getPicBeds()
+    this.needReload = this.$db.get('needReload')
+  }
+  buildContextMenu (plugin: IPicGoPlugin) {
+    const _this = this
+    let menu = [{
+      label: '启用插件',
+      enabled: !plugin.enabled,
+      click () {
+        _this.letPicGoSaveData({
+          [`picgoPlugins.picgo-plugin-${plugin.name}`]: true
+        })
+        plugin.enabled = true
+        _this.getPicBeds()
+      }
+    }, {
+      label: '禁用插件',
+      enabled: plugin.enabled,
+      click () {
+        _this.letPicGoSaveData({
+          [`picgoPlugins.picgo-plugin-${plugin.name}`]: false
+        })
+        plugin.enabled = false
+        _this.getPicBeds()
+        if (plugin.config.transformer.name) {
+          _this.handleRestoreState('transformer', plugin.config.transformer.name)
         }
-      }, {
-        label: '禁用插件',
-        enabled: plugin.enabled,
-        click () {
-          _this.$db.read().set(`picgoPlugins.picgo-plugin-${plugin.name}`, false).write()
-          plugin.enabled = false
-          _this.getPicBeds()
-          if (plugin.config.transformer.name) {
-            _this.handleRestoreState('transformer', plugin.config.transformer.name)
-          }
-          if (plugin.config.uploader.name) {
-            _this.handleRestoreState('uploader', plugin.config.uploader.name)
-          }
-        }
-      }, {
-        label: '卸载插件',
-        click () {
-          _this.uninstallPlugin(plugin.name)
-        }
-      }, {
-        label: '更新插件',
-        click () {
-          _this.updatePlugin(plugin.name)
-        }
-      }]
-      for (let i in plugin.config) {
-        if (plugin.config[i].config.length > 0) {
-          const obj = {
-            label: `配置${i} - ${plugin.config[i].name}`,
-            click () {
-              _this.currentType = i
-              _this.configName = plugin.config[i].name
-              _this.dialogVisible = true
-              _this.config = plugin.config[i].config
-            }
-          }
-          menu.push(obj)
+        if (plugin.config.uploader.name) {
+          _this.handleRestoreState('uploader', plugin.config.uploader.name)
         }
       }
-
-      // handle transformer
-      if (plugin.config.transformer.name) {
-        let currentTransformer = this.$db.read().get('picBed.transformer').value() || 'path'
-        let pluginTransformer = plugin.config.transformer.name
+    }, {
+      label: '卸载插件',
+      click () {
+        _this.uninstallPlugin(plugin.name)
+      }
+    }, {
+      label: '更新插件',
+      click () {
+        _this.updatePlugin(plugin.name)
+      }
+    }]
+    for (let i in plugin.config) {
+      if (plugin.config[i].config.length > 0) {
         const obj = {
-          label: `${currentTransformer === pluginTransformer ? '禁用' : '启用'}transformer - ${plugin.config.transformer.name}`,
+          label: `配置${i} - ${plugin.config[i].name}`,
           click () {
-            _this.toggleTransformer(plugin.config.transformer.name)
+            _this.currentType = i
+            _this.configName = plugin.config[i].name
+            _this.dialogVisible = true
+            _this.config = plugin.config[i].config
           }
         }
         menu.push(obj)
       }
+    }
 
-      // plugin custom menus
-      if (plugin.guiMenu) {
+    // handle transformer
+    if (plugin.config.transformer.name) {
+      let currentTransformer = this.$db.get('picBed.transformer') || 'path'
+      let pluginTransformer = plugin.config.transformer.name
+      const obj = {
+        label: `${currentTransformer === pluginTransformer ? '禁用' : '启用'}transformer - ${plugin.config.transformer.name}`,
+        click () {
+          _this.toggleTransformer(plugin.config.transformer.name)
+        }
+      }
+      menu.push(obj)
+    }
+
+    // plugin custom menus
+    if (plugin.guiMenu) {
+      menu.push({
+        // @ts-ignore
+        type: 'separator'
+      })
+      for (let i of plugin.guiMenu) {
         menu.push({
-          type: 'separator'
+          label: i.label,
+          click () {
+            ipcRenderer.send('pluginActions', plugin.name, i.label)
+          }
         })
-        for (let i of plugin.guiMenu) {
-          menu.push({
-            label: i.label,
-            click () {
-              _this.$electron.ipcRenderer.send('pluginActions', plugin.name, i.label)
-            }
-          })
-        }
       }
+    }
 
-      this.menu = this.$electron.remote.Menu.buildFromTemplate(menu)
-      this.menu.popup(this.$electron.remote.getCurrentWindow())
-    },
-    getPluginList () {
-      this.$electron.ipcRenderer.send('getPluginList')
-    },
-    getPicBeds () {
-      this.$electron.ipcRenderer.send('getPicBeds')
-    },
-    installPlugin (item) {
-      if (!item.gui) {
-        this.$confirm('该插件未对可视化界面进行优化, 是否继续安装?', '提示', {
-          confirmButtonText: '确定',
-          cancelButtonText: '取消',
-          type: 'warning'
-        }).then(() => {
-          item.ing = true
-          this.$electron.ipcRenderer.send('installPlugin', item.name)
-        }).catch(() => {
-          console.log('Install canceled')
-        })
-      } else {
+    this.menu = Menu.buildFromTemplate(menu)
+    this.menu.popup()
+  }
+  getPluginList () {
+    ipcRenderer.send('getPluginList')
+  }
+  getPicBeds () {
+    ipcRenderer.send('getPicBeds')
+  }
+  installPlugin (item: IPicGoPlugin) {
+    if (!item.gui) {
+      this.$confirm('该插件未对可视化界面进行优化, 是否继续安装?', '提示', {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }).then(() => {
         item.ing = true
-        this.$electron.ipcRenderer.send('installPlugin', item.name)
+        ipcRenderer.send('installPlugin', item.name)
+      }).catch(() => {
+        console.log('Install canceled')
+      })
+    } else {
+      item.ing = true
+      ipcRenderer.send('installPlugin', item.name)
+    }
+  }
+  uninstallPlugin (val: string) {
+    this.pluginList.forEach(item => {
+      if (item.name === val) {
+        item.ing = true
       }
-    },
-    uninstallPlugin (val) {
-      this.pluginList.forEach(item => {
-        if (item.name === val) {
-          item.ing = true
-        }
+    })
+    ipcRenderer.send('uninstallPlugin', val)
+  }
+  updatePlugin (val: string) {
+    this.pluginList.forEach(item => {
+      if (item.name === val) {
+        item.ing = true
+      }
+    })
+    ipcRenderer.send('updatePlugin', val)
+  }
+  reloadApp () {
+    remote.app.relaunch()
+    remote.app.exit(0)
+  }
+  handleReload () {
+    this.$db.set('needReload', true)
+    this.needReload = true
+    const successNotification = new Notification('更新成功', {
+      body: '请点击此通知重启应用以生效'
+    })
+    successNotification.onclick = () => {
+      this.reloadApp()
+    }
+  }
+  cleanSearch () {
+    this.searchText = ''
+  }
+  toggleTransformer (transformer: string) {
+    let currentTransformer = this.$db.get('picBed.transformer') || 'path'
+    if (currentTransformer === transformer) {
+      this.letPicGoSaveData({
+        'picBed.transformer': 'path'
       })
-      this.$electron.ipcRenderer.send('uninstallPlugin', val)
-    },
-    updatePlugin (val) {
-      this.pluginList.forEach(item => {
-        if (item.name === val) {
-          item.ing = true
-        }
+    } else {
+      this.letPicGoSaveData({
+        'picBed.transformer': transformer
       })
-      this.$electron.ipcRenderer.send('updatePlugin', val)
-    },
-    reloadApp () {
-      this.$electron.remote.app.relaunch()
-      this.$electron.remote.app.exit(0)
-    },
-    handleReload () {
-      this.$db.read().set('needReload', true).write()
-      this.needReload = true
-      const successNotification = new window.Notification('更新成功', {
-        body: '请点击此通知重启应用以生效'
+    }
+  }
+  async handleConfirmConfig () {
+    // @ts-ignore
+    const result = await this.$refs.configForm.validate()
+    if (result !== false) {
+      switch (this.currentType) {
+        case 'plugin':
+          this.letPicGoSaveData({
+            [`picgo-plugin-${this.configName}`]: result
+          })
+          break
+        case 'uploader':
+          this.letPicGoSaveData({
+            [`picBed.${this.configName}`]: result
+          })
+          break
+        case 'transformer':
+          this.letPicGoSaveData({
+            [`transformer.${this.configName}`]: result
+          })
+          break
+      }
+      const successNotification = new Notification('设置结果', {
+        body: '设置成功'
       })
       successNotification.onclick = () => {
-        this.reloadApp()
+        return true
       }
-    },
-    cleanSearch () {
-      this.searchText = ''
-    },
-    toggleTransformer (transformer) {
-      let currentTransformer = this.$db.read().get('picBed.transformer').value() || 'path'
-      if (currentTransformer === transformer) {
-        this.$db.read().set('picBed.transformer', 'path').write()
-      } else {
-        this.$db.read().set('picBed.transformer', transformer).write()
-      }
-    },
-    async handleConfirmConfig () {
-      const result = await this.$refs.configForm.validate()
-      if (result !== false) {
-        switch (this.currentType) {
-          case 'plugin':
-            this.$db.read().set(`picgo-plugin-${this.configName}`, result).write()
-            break
-          case 'uploader':
-            this.$db.read().set(`picBed.${this.configName}`, result).write()
-            break
-          case 'transformer':
-            this.$db.read().set(`transformer.${this.configName}`, result).write()
-            break
-        }
-        const successNotification = new window.Notification('设置结果', {
-          body: '设置成功'
-        })
-        successNotification.onclick = () => {
-          return true
-        }
-        this.dialogVisible = false
-        this.getPluginList()
-      }
-    },
-    getSearchResult: function (val) {
-      // this.$http.get(`https://api.npms.io/v2/search?q=${val}`)
-      this.$http.get(`https://registry.npmjs.com/-/v1/search?text=${val}`)
-        .then(res => {
-          this.pluginList = res.data.objects.map(item => {
+      this.dialogVisible = false
+      this.getPluginList()
+    }
+  }
+  getSearchResult (val: string) {
+    // this.$http.get(`https://api.npms.io/v2/search?q=${val}`)
+    this.$http.get(`https://registry.npmjs.com/-/v1/search?text=${val}`)
+      .then((res: INPMSearchResult) => {
+        this.pluginList = res.data.objects
+          .filter((item:INPMSearchResultObject) => {
+            return item.package.name.includes('picgo-plugin-')
+          })
+          .map((item: INPMSearchResultObject) => {
             return this.handleSearchResult(item)
           })
-          this.loading = false
-        })
-        .catch(err => {
-          console.log(err)
-          this.loading = false
-        })
-    },
-    handleSearchResult (item) {
-      const name = item.package.name.replace(/picgo-plugin-/, '')
-      let gui = false
-      if (item.package.keywords && item.package.keywords.length > 0) {
-        if (item.package.keywords.includes('picgo-gui-plugin')) {
-          gui = true
-        }
+        this.loading = false
+      })
+      .catch(err => {
+        console.log(err)
+        this.loading = false
+      })
+  }
+  handleSearchResult (item: INPMSearchResultObject) {
+    const name = item.package.name.replace(/picgo-plugin-/, '')
+    let gui = false
+    if (item.package.keywords && item.package.keywords.length > 0) {
+      if (item.package.keywords.includes('picgo-gui-plugin')) {
+        gui = true
       }
-      return {
-        name: name,
-        author: item.package.author.name,
-        description: item.package.description,
-        logo: `https://cdn.jsdelivr.net/npm/${item.package.name}/logo.png`,
-        config: {},
-        homepage: item.package.links ? item.package.links.homepage : '',
-        hasInstall: this.pluginNameList.some(plugin => plugin === item.package.name.replace(/picgo-plugin-/, '')),
-        version: item.package.version,
-        gui,
-        ing: false // installing or uninstalling
-      }
-    },
-    // restore Uploader & Transformer
-    handleRestoreState (item, name) {
-      if (item === 'uploader') {
-        const current = this.$db.read().get('picBed.current').value()
-        if (current === name) {
-          this.$db.read().set('picBed.current', 'smms').write()
-        }
-      }
-      if (item === 'transformer') {
-        const current = this.$db.read().get('picBed.transformer').value()
-        if (current === name) {
-          this.$db.read().set('picBed.transformer', 'path').write()
-        }
-      }
-    },
-    openHomepage (url) {
-      if (url) {
-        this.$electron.remote.shell.openExternal(url)
-      }
-    },
-    handleInputBoxClose () {
-      this.$electron.ipcRenderer.send('showInputBox', this.inputBoxValue)
-    },
-    goAwesomeList () {
-      this.$electron.remote.shell.openExternal('https://github.com/PicGo/Awesome-PicGo')
     }
-  },
+    return {
+      name: name,
+      author: item.package.author.name,
+      description: item.package.description,
+      logo: `https://cdn.jsdelivr.net/npm/${item.package.name}/logo.png`,
+      config: {},
+      homepage: item.package.links ? item.package.links.homepage : '',
+      hasInstall: this.pluginNameList.some(plugin => plugin === item.package.name.replace(/picgo-plugin-/, '')),
+      version: item.package.version,
+      gui,
+      ing: false // installing or uninstalling
+    }
+  }
+  // restore Uploader & Transformer
+  handleRestoreState (item: string, name: string) {
+    if (item === 'uploader') {
+      const current = this.$db.get('picBed.current')
+      if (current === name) {
+        this.letPicGoSaveData({
+          'picBed.current': 'smms'
+        })
+      }
+    }
+    if (item === 'transformer') {
+      const current = this.$db.get('picBed.transformer')
+      if (current === name) {
+        this.letPicGoSaveData({
+          'picBed.transformer': 'path'
+        })
+      }
+    }
+  }
+  openHomepage (url: string) {
+    if (url) {
+      remote.shell.openExternal(url)
+    }
+  }
+  goAwesomeList () {
+    remote.shell.openExternal('https://github.com/PicGo/Awesome-PicGo')
+  }
+  letPicGoSaveData (data: IObj) {
+    ipcRenderer.send('picgoSaveData', data)
+  }
   beforeDestroy () {
-    this.$electron.ipcRenderer.removeAllListeners('pluginList')
-    this.$electron.ipcRenderer.removeAllListeners('installSuccess')
-    this.$electron.ipcRenderer.removeAllListeners('uninstallSuccess')
-    this.$electron.ipcRenderer.removeAllListeners('updateSuccess')
-    this.$electron.ipcRenderer.removeAllListeners('showInputBox')
+    ipcRenderer.removeAllListeners('pluginList')
+    ipcRenderer.removeAllListeners('installSuccess')
+    ipcRenderer.removeAllListeners('uninstallSuccess')
+    ipcRenderer.removeAllListeners('updateSuccess')
   }
 }
 </script>
@@ -483,6 +495,9 @@ $darwinBg = #172426
       font-size 20px
       vertical-align middle
       cursor pointer
+      transition color .2s ease-in-out
+      &:hover
+        color #49B1F5
   .handle-bar
     margin-bottom 20px
     &.cut-width
